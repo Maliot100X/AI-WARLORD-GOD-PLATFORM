@@ -20,15 +20,14 @@ import {
   Crown,
   Skull,
   Flame,
-  Lightning,
+  Zap as Lightning,
   Rocket,
   Sword,
-  Dragon,
-  Phoenix,
-  Thunder,
+  TrendingUp as Dragon,
   Star,
   Diamond,
-  Crown as King
+  Crown as King,
+  Sparkles as Thunder
 } from 'lucide-react'
 
 // EPIC WARLORD LAYOUT WITH HOLLYWOOD STYLE
