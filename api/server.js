@@ -1,182 +1,146 @@
-const express = require('express')
-const cors = require('cors')
-const http = require('http')
-const { Server } = require('socket.io')
-const helmet = require('helmet')
-const compression = require('compression')
-const rateLimit = require('express-rate-limit')
-const winston = require('winston')
-require('dotenv').config()
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const winston = require('winston');
 
-// Initialize Winston logger
+// Import routes
+const agentRoutes = require('./routes/agents');
+const tradingRoutes = require('./routes/trading');
+const apiFactoryRoutes = require('./routes/api-factory');
+const githubRoutes = require('./routes/github');
+const vpsRoutes = require('./routes/vps');
+const skillsRoutes = require('./routes/skills');
+const authRoutes = require('./routes/auth');
+const webhookRoutes = require('./routes/webhooks');
+const systemRoutes = require('./routes/system');
+
+// Import middleware
+const { authenticateToken, requireAdmin } = require('./middleware/auth');
+const { generalLimiter } = require('./middleware/rateLimit');
+
+// Configure logger
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
     winston.format.json()
   ),
+  defaultMeta: { service: 'api-server' },
   transports: [
     new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
+    new winston.transports.File({ filename: 'logs/combined.log' })
   ]
-})
+});
 
-const app = express()
-const server = http.createServer(app)
+if (process.env.NODE_ENV !== 'production') {
+  logger.add(new winston.transports.Console({
+    format: winston.format.simple()
+  }));
+}
+
+const app = express();
+const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
-  transports: ['websocket', 'polling']
-})
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
+});
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-})
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ai-warlord', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+}).then(() => {
+  logger.info('Connected to MongoDB');
+}).catch((error) => {
+  logger.error('MongoDB connection error:', error);
+});
 
 // Middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      connectSrc: ["'self'", "ws://localhost:3001", "wss://*"],
-    },
-  },
-}))
-app.use(compression())
+app.use(helmet());
+app.use(compression());
 app.use(cors({
-  origin: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+  origin: process.env.CLIENT_URL || "http://localhost:3000",
   credentials: true
-}))
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
-app.use('/api', limiter)
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(generalLimiter);
 
 // Request logging
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`, {
+  logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
     userAgent: req.get('User-Agent')
-  })
-  next()
-})
+  });
+  next();
+});
 
-// API Routes
-app.use('/api/agents', require('./routes/agents'))
-app.use('/api/trading', require('./routes/trading'))
-app.use('/api/api-factory', require('./routes/api-factory'))
-app.use('/api/github', require('./routes/github'))
-app.use('/api/vps', require('./routes/vps'))
-app.use('/api/skills', require('./routes/skills'))
-app.use('/api/auth', require('./routes/auth'))
-app.use('/api/webhooks', require('./routes/webhooks'))
-app.use('/api/system', require('./routes/system'))
+// Routes
+app.use('/api/agents', authenticateToken, agentRoutes);
+app.use('/api/trading', authenticateToken, tradingRoutes);
+app.use('/api/api-factory', authenticateToken, apiFactoryRoutes);
+app.use('/api/github', authenticateToken, githubRoutes);
+app.use('/api/vps', authenticateToken, vpsRoutes);
+app.use('/api/skills', authenticateToken, skillsRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/webhooks', authenticateToken, webhookRoutes);
+app.use('/api/system', systemRoutes);
 
-// Health check with detailed status
+// Health check
 app.get('/health', (req, res) => {
-  const health = {
+  res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    services: {
-      api: 'running',
-      websocket: 'running',
-      database: 'connected',
-      redis: 'connected',
-      agents: 'operational',
-      trading: 'operational',
-      api_factory: 'operational',
-      github: 'operational',
-      vps: 'operational'
-    },
-    metrics: {
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      cpu: process.cpuUsage()
-    },
-    environment: process.env.NODE_ENV || 'development'
-  }
-  res.json(health)
-})
+    uptime: process.uptime(),
+    version: '1.0.0'
+  });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  logger.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Not found'
+  });
+});
 
 // WebSocket connection handling
 io.on('connection', (socket) => {
-  logger.info('New WebSocket connection:', socket.id)
-  
-  // Join rooms based on client type
-  socket.on('join:agent', (agentId) => {
-    socket.join(`agent:${agentId}`)
-    logger.info(`Socket ${socket.id} joined agent:${agentId}`)
-  })
-  
-  socket.on('join:trading', (pair) => {
-    socket.join(`trading:${pair}`)
-    logger.info(`Socket ${socket.id} joined trading:${pair}`)
-  })
-  
-  socket.on('join:mission', (missionId) => {
-    socket.join(`mission:${missionId}`)
-    logger.info(`Socket ${socket.id} joined mission:${missionId}`)
-  })
-  
-  // Real-time updates
-  socket.on('agent:status', (data) => {
-    io.to(`agent:${data.agentId}`).emit('agent:status:update', data)
-  })
-  
-  socket.on('trading:signal', (data) => {
-    io.to(`trading:${data.pair}`).emit('trading:signal:update', data)
-  })
-  
-  socket.on('mission:progress', (data) => {
-    io.to(`mission:${data.missionId}`).emit('mission:progress:update', data)
-  })
-  
+  logger.info('Client connected:', socket.id);
+
+  socket.on('join-room', (room) => {
+    socket.join(room);
+    logger.info(`Socket ${socket.id} joined room: ${room}`);
+  });
+
   socket.on('disconnect', () => {
-    logger.info('WebSocket disconnected:', socket.id)
-  })
-})
+    logger.info('Client disconnected:', socket.id);
+  });
+});
 
-// Global error handler
-app.use((err, req, res, next) => {
-  logger.error('Unhandled error:', err)
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
-    timestamp: new Date().toISOString()
-  })
-})
+// Export socket.io instance for use in controllers
+app.set('io', io);
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Not found',
-    message: `Cannot ${req.method} ${req.originalUrl}`,
-    timestamp: new Date().toISOString()
-  })
-})
-
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  logger.info(`🚀 WARLORD API server running on port ${PORT}`)
-  logger.info(`🔗 WebSocket server ready at ws://localhost:${PORT}`)
-  logger.info(`🌐 Health check: http://localhost:${PORT}/health`)
-  logger.info(`⚡️ Environment: ${process.env.NODE_ENV || 'development'}`)
-})
+  logger.info(`API Server running on port ${PORT}`);
+});
 
-module.exports = { app, io, server }
+module.exports = { app, server, io };
