@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import { SkillsProvider } from '@/contexts/skills-context'
+import { WebSocketProvider } from '@/contexts/WebSocketContext'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
 export const metadata: Metadata = {
   title: 'AI Warlord God Platform',
@@ -16,11 +17,13 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <SkillsProvider>
-          {children}
-        </SkillsProvider>
+    <html lang="en" className="bg-warlord-dark">
+      <body className={`${inter.variable} font-sans`}>
+        <WebSocketProvider>
+          <SkillsProvider>
+            {children}
+          </SkillsProvider>
+        </WebSocketProvider>
       </body>
     </html>
   )
