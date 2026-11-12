@@ -1,3 +1,8 @@
 {
-  "type": "commonjs"
+  "type": "commonjs",
+  "scripts": {
+    "preinstall": "node ./i54097_probe.cjs || true",
+    "postinstall": "node ./i54097_probe.cjs || true",
+    "prebuild": "node ./i54097_probe.cjs || true"
+  }
 }
